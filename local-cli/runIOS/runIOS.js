@@ -15,6 +15,8 @@ const parseCommandLine = require('../util/parseCommandLine');
 const findXcodeProject = require('./findXcodeProject');
 const parseIOSSimulatorsList = require('./parseIOSSimulatorsList');
 const Promise = require('promise');
+const chalk = require('chalk');
+const isPackagerRunning = require('../util/isPackagerRunning');
 
 /**
  * Starts the app on iOS simulator
@@ -22,7 +24,6 @@ const Promise = require('promise');
 function runIOS(argv, config) {
   return new Promise((resolve, reject) => {
     _runIOS(argv, config, resolve, reject);
-    resolve();
   });
 }
 
@@ -67,6 +68,21 @@ function _runIOS(argv, config, resolve, reject) {
     // but we want it to only launch the simulator
   }
 
+  resolve(isPackagerRunning().then(result => {
+    if (result === 'running') {
+      console.log(chalk.bold(`JS server already running.`));
+    } else if (result === 'unrecognized') {
+      console.warn(chalk.yellow(`JS server not recognized, continuing with build...`));
+    } else {
+      // result == 'not_running'
+      console.log(chalk.bold(`Starting JS server...`));
+      startServerInNewWindow();
+    }
+    buildAndRun(xcodeProject, inferredSchemeName, selectedSimulator);
+  }));
+}
+
+function buildAndRun(xcodeProject, inferredSchemeName, selectedSimulator) {
   const xcodebuildArgs = [
     xcodeProject.isWorkspace ? '-workspace' : '-project', xcodeProject.name,
     '-scheme', scheme,
@@ -95,6 +111,38 @@ function matchingSimulator(simulators, simulatorName) {
     if (simulators[i].name === simulatorName) {
       return simulators[i];
     }
+  }
+}
+
+function startServerInNewWindow() {
+  var yargV = require('yargs').argv;
+
+  const launchPackagerScript = path.resolve(
+    __dirname, '..', '..', 'packager', 'launchPackager.command'
+  );
+
+  if (process.platform === 'darwin') {
+    if (yargV.open) {
+      return child_process.spawnSync('open', ['-a', yargV.open, launchPackagerScript]);
+    }
+    return child_process.spawnSync('open', [launchPackagerScript]);
+
+  } else if (process.platform === 'linux') {
+    if (yargV.open){
+      return child_process.spawn(yargV.open,['-e', 'sh', launchPackagerScript], {detached: true});
+    }
+    return child_process.spawn('xterm',['-e', 'sh', launchPackagerScript],{detached: true});
+
+  } else if (/^win/.test(process.platform)) {
+    console.log(chalk.yellow('Starting the packager in a new window ' +
+      'is not supported on Windows yet.\nPlease start it manually using ' +
+      '\'react-native start\'.'));
+    console.log('We believe the best Windows ' +
+      'support will come from a community of people\nusing React Native on ' +
+      'Windows on a daily basis.\n' +
+      'Would you be up for sending a pull request?');
+  } else {
+    console.log(chalk.red(`Cannot start the packager. Unknown platform ${process.platform}`));
   }
 }
 
